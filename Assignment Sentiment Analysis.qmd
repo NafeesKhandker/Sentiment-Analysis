@@ -1,0 +1,109 @@
+---
+title: "Assignment Sentiment Analysis"
+author: "Khandker Qaiduzzaman"
+format: html
+editor: visual
+---
+
+# Objective
+
+The goal of this assignment is to replicate the sentiment analysis example from Chapter 2 of Text Mining with R: A Tidy Approach (Silge & Robinson) and extend it using a different text corpus and additional sentiment lexicons.
+
+------------------------------------------------------------------------
+
+# Approach
+
+This analysis follows a two-part structure:
+
+1.  Reproduction of the Chapter 2 sentiment analysis example
+2.  Extension using a real-world news dataset collected via an external API
+
+------------------------------------------------------------------------
+
+## Step 1: Reproducing the Chapter 2 Example
+
+This step reproduces the sentiment analysis workflow from Chapter 2 of *Text Mining with R: A Tidy Approach* (Silge & Robinson). The chapter demonstrates sentiment analysis using tidy text principles, where text is treated as individual word tokens and sentiment is computed by joining words with sentiment lexicons.
+
+The process assumes that overall sentiment can be estimated by aggregating word-level sentiment contributions. Text is first converted into a tidy format using `unnest_tokens()`, stop words are removed using `anti_join()`, and sentiment values are assigned through `inner_join()` with sentiment lexicons.
+
+The analysis uses three lexicons from the `tidytext` package:
+
+-   **Bing:** positive/negative classification
+-   **AFINN:** numeric sentiment scores (-5 to +5)
+-   **NRC:** emotion categories (e.g., joy, fear, anger)
+
+These lexicons are applied to the example dataset from Jane Austen’s novels, and sentiment is summarized across words and text sections using tidy data operations such as joins, grouping, and counting.
+
+------------------------------------------------------------------------
+
+## Step 2: Extension Using NewsAPI and Additional Sentiment Lexicons
+
+To extend the analysis, I use news headlines collected through the NewsAPI service as the external text corpus. Headlines are well-suited for sentiment analysis because they are short, structured, and represent real-world, continuously updated news content, making them a strong contrast to the literary dataset used in Chapter 2.
+
+Initially, the New York Times API was considered; however, due to rate limits and restricted access for large-scale retrieval, I switched to NewsAPI, which allows more flexible and reliable access to a larger number of headlines.
+
+The dataset is retrieved using the NewsAPI `/v2/everything` endpoint with keyword-based queries (e.g., politics, world, business). Only the `title` field is extracted and used as the text corpus for analysis.
+
+To extend the sentiment analysis beyond the original example, two additional lexicons are applied alongside the Bing lexicon:
+
+-   **NRC Lexicon:** assigns words to emotional categories such as joy, fear, anger, and trust
+-   **AFINN Lexicon:** provides numeric sentiment scores ranging from negative to positive intensity
+
+These additional lexicons enable a more detailed comparison of sentiment interpretation across different methods and provide both categorical and intensity-based perspectives on the same dataset.
+
+------------------------------------------------------------------------
+
+## Data Analysis Workflow
+
+The analysis begins by reproducing the Chapter 2 sentiment analysis workflow from *Text Mining with R*, including tokenization with `tidytext`, application of the Bing lexicon, and summarization of sentiment distribution.
+
+For the extension, news headlines are collected using the NewsAPI `/v2/everything` endpoint, and the JSON response is converted into a tidy data frame with the `title` field used as the text corpus.
+
+The combined dataset is then tokenized using `unnest_tokens()`, and sentiment analysis is performed using the Bing, NRC, and AFINN lexicons to compute both sentiment counts and scores.
+
+Finally, results are compared across lexicons and against the original Chapter 2 example to evaluate how different sentiment methods and text sources affect interpretation, particularly between structured literary text and real-world news headlines.
+
+------------------------------------------------------------------------
+
+## Anticipated Challenges
+
+Several challenges are expected:
+
+-   News headlines are very short, which may reduce sentiment word matches
+-   Different lexicons may produce inconsistent sentiment classifications
+-   API limitations may affect the amount of data that can be retrieved
+-   News content may contain ambiguous or neutral language, making sentiment detection more difficult
+
+------------------------------------------------------------------------
+
+## Example API Implementation (NewsAPI)
+
+```{r}
+library(httr)
+library(jsonlite)
+library(dplyr)
+
+# API key
+api_key <- Sys.getenv("NEWS_API_KEY")
+
+# Endpoint URL
+url <- paste0(
+  "https://newsapi.org/v2/everything?q=politics&pageSize=100&apiKey=",
+  api_key
+)
+
+# Make request
+response <- GET(url)
+
+# Convert to JSON
+data <- fromJSON(content(response, "text", encoding = "UTF-8"))
+
+# Extract headlines only
+headlines <- data$articles$title
+
+# Convert to dataframe
+headlines_df <- data.frame(headline = headlines)
+
+# View
+head(headlines_df)
+```
