@@ -22,15 +22,15 @@ This analysis follows a two-part structure:
 
 ## Step 1: Reproducing the Chapter 2 Example
 
-This step reproduces the sentiment analysis workflow from Chapter 2 of *Text Mining with R: A Tidy Approach* (Silge & Robinson). The chapter demonstrates sentiment analysis using tidy text principles, where text is treated as individual word tokens and sentiment is computed by joining words with sentiment lexicons.
+This step reproduces the sentiment analysis workflow from Chapter 2 of *Text Mining with R: A Tidy Approach* (Silge & Robinson, 2017). The chapter demonstrates sentiment analysis using tidy text principles, where text is treated as individual word tokens and sentiment is computed by joining words with sentiment lexicons.
 
 The process assumes that overall sentiment can be estimated by aggregating word-level sentiment contributions. Text is first converted into a tidy format using `unnest_tokens()`, stop words are removed using `anti_join()`, and sentiment values are assigned through `inner_join()` with sentiment lexicons.
 
 The analysis uses three lexicons from the `tidytext` package:
 
--   **Bing:** positive/negative classification
--   **AFINN:** numeric sentiment scores (-5 to +5)
--   **NRC:** emotion categories (e.g., joy, fear, anger)
+-   **Bing:** positive/negative classification (Hu & Liu, 2004)
+-   **AFINN:** numeric sentiment scores (-5 to +5) (Nielsen, 2011)
+-   **NRC:** emotion categories (e.g., joy, fear, anger) (Mohammad & Turney, 2013)
 
 These lexicons are applied to the example dataset from Jane Austen’s novels, and sentiment is summarized across words and text sections using tidy data operations such as joins, grouping, and counting.
 
@@ -38,30 +38,27 @@ These lexicons are applied to the example dataset from Jane Austen’s novels, a
 
 ## Step 2: Extension Using NewsAPI and Additional Sentiment Lexicons
 
-To extend the analysis, I use news headlines collected through the NewsAPI service as the external text corpus. Headlines are well-suited for sentiment analysis because they are short, structured, and represent real-world, continuously updated news content, making them a strong contrast to the literary dataset used in Chapter 2.
+To extend the analysis, I use full news articles collected through the NewsAPI service as the external text corpus. Full articles are used instead of headlines because they provide richer context and more reliable sentiment signals compared to short headline-only text.
 
-Initially, the New York Times API was considered; however, due to rate limits and restricted access for large-scale retrieval, I switched to NewsAPI, which allows more flexible and reliable access to a larger number of headlines.
+Initially, the New York Times API was considered; however, due to rate limits and restricted access for large-scale retrieval, I switched to NewsAPI, which provides more flexible and scalable access to news content.
 
-The dataset is retrieved using the NewsAPI `/v2/everything` endpoint with keyword-based queries (e.g., politics, world, business). Only the `title` field is extracted and used as the text corpus for analysis.
+The dataset is retrieved using the NewsAPI `/v2/everything` endpoint with keyword-based queries (e.g., politics, technology, business, sports). The full article text is constructed by combining title, description, and content.
 
-To extend the sentiment analysis beyond the original example, two additional lexicons are applied alongside the Bing lexicon:
+To extend sentiment analysis beyond the original example, one additional lexicon is applied alongside Bing, AFINN and NRC:
 
--   **NRC Lexicon:** assigns words to emotional categories such as joy, fear, anger, and trust
--   **AFINN Lexicon:** provides numeric sentiment scores ranging from negative to positive intensity
+-   **Loughran–McDonald:** specifically designed for financial and news text sentiment (Loughran & McDonald, 2011)
 
-These additional lexicons enable a more detailed comparison of sentiment interpretation across different methods and provide both categorical and intensity-based perspectives on the same dataset.
-
-------------------------------------------------------------------------
+Additionally, domain-specific stop words (e.g., political figures such as “trump”) are removed to reduce bias in sentiment scoring.
 
 ## Data Analysis Workflow
 
-The analysis begins by reproducing the Chapter 2 sentiment analysis workflow from *Text Mining with R*, including tokenization with `tidytext`, application of the Bing lexicon, and summarization of sentiment distribution.
+The analysis begins by reproducing the Chapter 2 sentiment workflow using tidy text principles, including tokenization, lexicon joins, and aggregation of sentiment scores.
 
-For the extension, news headlines are collected using the NewsAPI `/v2/everything` endpoint, and the JSON response is converted into a tidy data frame with the `title` field used as the text corpus.
+For the extension, full news articles are collected using the NewsAPI `/v2/everything` endpoint. The JSON response is converted into a tidy data frame, and the full article text is created by combining title, description, and content.
 
-The combined dataset is then tokenized using `unnest_tokens()`, and sentiment analysis is performed using the Bing, NRC, and AFINN lexicons to compute both sentiment counts and scores.
+The dataset is then tokenized using `unnest_tokens()`, stop words are removed, and sentiment analysis is performed using Bing, NRC, AFINN, and Loughran lexicons. Results are aggregated by article and category.
 
-Finally, results are compared across lexicons and against the original Chapter 2 example to evaluate how different sentiment methods and text sources affect interpretation, particularly between structured literary text and real-world news headlines.
+Finally, sentiment outputs are compared across lexicons.
 
 ------------------------------------------------------------------------
 
@@ -69,41 +66,340 @@ Finally, results are compared across lexicons and against the original Chapter 2
 
 Several challenges are expected:
 
--   News headlines are very short, which may reduce sentiment word matches
--   Different lexicons may produce inconsistent sentiment classifications
--   API limitations may affect the amount of data that can be retrieved
--   News content may contain ambiguous or neutral language, making sentiment detection more difficult
+-   News articles contain noisy and mixed sentiment language
+-   Named entities can distort sentiment classification
+-   Lexicons may disagree on sentiment labeling
+-   API limitations may restrict data volume
 
 ------------------------------------------------------------------------
 
-## Example API Implementation (NewsAPI)
+# Step 1 — Reproduce the Base Example (Jane Austen Corpus)
 
+### Load and tidy Jane Austen text
+
+This step tokenizes the novels into individual words and creates structural metadata such as line numbers and chapters.
+
+```{r}
+library(tidytext)
+library(janeaustenr)  # Provides Jane Austen novels
+library(dplyr)        # Data manipulation
+library(stringr)      # String processing functions
+
+tidy_books <- austen_books() %>%   # Load all Jane Austen books
+  group_by(book) %>%               # Group data by each book
+  mutate(
+    linenumber = row_number(),     # Create a line number within each book
+    chapter = cumsum(              # Create chapter numbers
+      str_detect(text,             # Detect lines that contain chapter titles
+                 regex("^chapter [\\divxlc]", 
+                       ignore_case = TRUE))
+    )
+  ) %>%
+  ungroup() %>%                   # Remove grouping
+  unnest_tokens(word, text)       # Convert text into one word per row (tidy format)
+```
+
+### NRC Joy Word Frequency (Example Lexicon Filtering)
+
+This example extracts only "joy" words from the NRC lexicon and counts their frequency in Emma.
+
+```{r}
+nrc_joy <- get_sentiments("nrc") %>%  # Get NRC sentiment lexicon
+  filter(sentiment == "joy")          # Keep only words labeled as "joy"
+
+tidy_books %>%
+  filter(book == "Emma") %>%   # Keep only the book "Emma"
+  inner_join(nrc_joy) %>%      # Keep only words that appear in the joy lexicon
+  count(word, sort = TRUE)     # Count frequency of each word (sorted descending)
+```
+
+### Sentiment Over Book Sections (Bing Lexicon)
+
+This block calculates sentiment across sections of novels using the Bing lexicon and visualizes sentiment trends.
+
+```{r}
+library(tidyr) 
+
+jane_austen_sentiment <- tidy_books %>%
+  inner_join(get_sentiments("bing")) %>%  # Match each word with its sentiment (positive/negative)
+  count(book, index = linenumber %/% 80, sentiment) %>%  # Count words by book, chunk (every 80 lines), and sentiment
+  pivot_wider(names_from = sentiment, values_from = n, values_fill = 0) %>%  # Convert "positive" and "negative" into separate columns
+  mutate(sentiment = positive - negative)  # Calculate net sentiment score (positive minus negative)
+
+library(ggplot2)  
+ggplot(jane_austen_sentiment, aes(index, sentiment, fill = book)) +
+  geom_col(show.legend = FALSE) +     # Bar chart of sentiment
+  facet_wrap(~book, ncol = 2, scales = "free_x")  # Create separate panels for each book
+```
+
+### Comparing Multiple Lexicons (AFINN, Bing, NRC)
+
+This section compares different sentiment lexicons applied to Pride & Prejudice.
+
+```{r}
+pride_prejudice <- tidy_books %>% 
+  filter(book == "Pride & Prejudice")  # Extract only this novel
+
+afinn <- pride_prejudice %>% 
+  inner_join(get_sentiments("afinn")) %>%  # Match words with AFINN scores
+  group_by(index = linenumber %/% 80) %>%  # Group into chunks of 80 lines
+  summarise(sentiment = sum(value)) %>%  # Sum sentiment scores within each chunk
+  mutate(method = "AFINN")  # Label method used
+
+bing_and_nrc <- bind_rows(
+  pride_prejudice %>% 
+    inner_join(get_sentiments("bing")) %>%
+    mutate(method = "Bing et al."),
+  pride_prejudice %>% 
+    inner_join(get_sentiments("nrc") %>% 
+                 filter(sentiment %in% c("positive", 
+                                         "negative"))
+    ) %>%
+    mutate(method = "NRC")) %>%
+  count(method, index = linenumber %/% 80, sentiment) %>% # Count sentiment occurrences per chunk and method
+  pivot_wider(names_from = sentiment,
+              values_from = n,
+              values_fill = 0) %>% 
+  mutate(sentiment = positive - negative) # Compute net sentiment
+
+bind_rows(afinn, 
+          bing_and_nrc) %>%
+  ggplot(aes(index, sentiment, fill = method)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~method, ncol = 1, scales = "free_y")
+```
+
+# Step 2: Extension Using NewsAPI (Full News Articles)
+
+This section extends the analysis to real-world news articles collected using NewsAPI. This implementation uses full articles rather than headlines only.
+
+The analysis is extended using multiple sentiment lexicons including Bing, NRC, AFINN, and Loughran–McDonald (finance/news-oriented lexicon).
+
+### Collect News Articles from NewsAPI
+This step retrieves full news articles for multiple categories using the NewsAPI /v2/everything endpoint.
 ```{r}
 library(httr)
 library(jsonlite)
 library(dplyr)
+library(purrr)
 
-# API key
 api_key <- Sys.getenv("NEWS_API_KEY")
 
-# Endpoint URL
-url <- paste0(
-  "https://newsapi.org/v2/everything?q=politics&pageSize=100&apiKey=",
-  api_key
+categories <- c("politics", "technology", "business", "sports")
+
+get_news <- function(query) {
+  url <- paste0(
+    "https://newsapi.org/v2/everything?q=",
+    query,
+    "&pageSize=100&language=en&apiKey=",
+    api_key
+  )
+  
+  res <- GET(url)
+  data <- fromJSON(content(res, "text", encoding = "UTF-8"))
+  
+  tibble(
+    category = query,
+    title = data$articles$title,
+    description = data$articles$description,
+    content = data$articles$content
+  )
+}
+
+news_df <- map_dfr(categories, get_news)
+
+head(news_df)
+```
+
+### Create Full Article Text Field
+This step combines title, description, and content into a single analysis-ready text field.
+```{r}
+news_df <- news_df %>%
+  group_by(category) %>%
+  mutate(
+    article_id = row_number(),
+    text = paste(title, description, content, sep = " ")
+  ) %>%
+  ungroup()
+```
+
+### Tokenization
+
+Full news articles are converted into tidy word-level format and stop words are removed.
+
+```{r}
+tidy_news <- news_df %>%
+  unnest_tokens(word, text) %>%
+  anti_join(stop_words)
+head(tidy_news)
+```
+
+### Bing Sentiment by Article
+
+This step calculates sentiment per article using Bing lexicon and aggregates sentiment scores.
+
+```{r}
+bing_sentiment <- tidy_news %>%
+  inner_join(get_sentiments("bing")) %>%
+  inner_join(news_df %>% select(category, article_id)) %>%
+  
+  # count sentiment words per article
+  group_by(category, article_id, sentiment) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  
+  # create chapter-like chunks within EACH category
+  mutate(index = article_id %/% 1) %>%
+  
+  # aggregate within category + chunk
+  group_by(category, index, sentiment) %>%
+  summarise(n = sum(n), .groups = "drop") %>%
+  
+  # reshape sentiment columns
+  pivot_wider(names_from = sentiment,
+              values_from = n,
+              values_fill = 0) %>%
+  
+  # net sentiment
+  mutate(sentiment = positive - negative)
+```
+
+### Sentiment Visualization (News Articles)
+
+This plot shows sentiment variation across different news categories.
+
+```{r}
+library(ggplot2)  
+
+ggplot(bing_sentiment, aes(x = index, y = sentiment, fill = category)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~category, scales = "free_x", ncol = 2) 
+```
+
+### Bag-of-Words Sentiment Exploration
+
+This section identifies the most frequent sentiment-contributing words in political news articles using Bing lexicon.
+
+```{r}
+bing_word_counts_news <- tidy_news %>%
+  filter(category == "politics") %>%   # focus on politics only
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  ungroup()
+
+bing_word_counts_news %>%
+  group_by(sentiment) %>%
+  slice_max(n, n = 10) %>%
+  ungroup() %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(x = n, y = word, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~sentiment, scales = "free_y") +
+  labs(
+    title = "Top Contributing Words to Sentiment in Political News",
+    x = "Contribution to sentiment",
+    y = NULL
+  )
+```
+
+### Stop Words and Cleaning Effect
+
+This section improves sentiment accuracy by removing misleading or non-informative words using a custom stop word list.
+
+```{r}
+library(tibble)
+
+custom_stop_words <- bind_rows(
+  tibble(word = c("trump"), lexicon = "custom"),
+  stop_words
 )
 
-# Make request
-response <- GET(url)
-
-# Convert to JSON
-data <- fromJSON(content(response, "text", encoding = "UTF-8"))
-
-# Extract headlines only
-headlines <- data$articles$title
-
-# Convert to dataframe
-headlines_df <- data.frame(headline = headlines)
-
-# View
-head(headlines_df)
+politics_news_clean <- tidy_news %>%
+  filter(category == "politics") %>%
+  anti_join(custom_stop_words, by = "word")
 ```
+
+### Lexicon Comparison (AFINN, Bing, NRC, Loughran)
+
+This section compares multiple sentiment lexicons applied to political news articles only, enabling a direct evaluation of sentiment methodology differences.
+
+```{r}
+afinn_clean <- politics_news_clean %>%
+  inner_join(get_sentiments("afinn")) %>%
+  group_by(index = article_id %/% 1) %>%
+  summarise(sentiment = sum(value), .groups = "drop") %>%
+  mutate(method = "AFINN")
+
+bing_nrc_clean <- bind_rows(
+  
+  politics_news_clean %>%
+    inner_join(get_sentiments("bing")) %>%
+    mutate(method = "Bing et al."),
+  
+  politics_news_clean %>%
+    inner_join(
+      get_sentiments("nrc") %>%
+        filter(sentiment %in% c("positive", "negative"))
+    ) %>%
+    mutate(method = "NRC")
+  
+) %>%
+  count(method, index = article_id %/% 1, sentiment) %>%
+  pivot_wider(
+    names_from = sentiment,
+    values_from = n,
+    values_fill = 0
+  ) %>%
+  mutate(sentiment = positive - negative)
+
+loughran_clean <- politics_news_clean %>%
+  inner_join(
+    get_sentiments("loughran") %>%
+      filter(sentiment %in% c("positive", "negative"))
+  ) %>%
+  count(index = article_id %/% 1, sentiment) %>%
+  pivot_wider(
+    names_from = sentiment,
+    values_from = n,
+    values_fill = 0
+  ) %>%
+  mutate(
+    sentiment = positive - negative,
+    method = "Loughran-McDonald"
+  )
+
+bind_rows(
+  afinn_clean,
+  bing_nrc_clean,
+  loughran_clean
+) %>%
+  ggplot(aes(x = index, y = sentiment, fill = method)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~method, ncol = 1, scales = "free_y") +
+  labs(
+    title = "Sentiment Comparison (After Stop Word Removal)",
+    x = "Article Index",
+    y = "Sentiment Score"
+  )
+```
+
+# Conclusion
+
+This analysis reproduced the sentiment analysis workflow from Chapter 2 of Text Mining with R: A Tidy Approach and extended it using a corpus of full news articles. Compared to the original example using Jane Austen’s novels, the results differ noticeably. The literary text produced smoother and more consistent sentiment patterns due to its structured narrative and stable language. In contrast, the news article corpus resulted in more volatile and less consistent sentiment scores, reflecting the mixed tone, factual reporting style, and domain-specific vocabulary of real-world news.
+
+Differences across lexicons were also more pronounced in the news data. The AFINN lexicon showed greater variation due to its numeric scoring system, while Bing and NRC produced sharper positive/negative swings. The Loughran–McDonald lexicon further diverged by emphasizing domain-specific negative terms common in formal or economic contexts. Additionally, applying custom stop word removal changed the sentiment distribution, highlighting the importance of preprocessing choices.
+
+Overall, the extended analysis demonstrates that sentiment results depend heavily on both the type of text corpus and the choice of lexicon, with real-world data requiring more careful interpretation than structured literary text.
+
+# References
+
+1. Silge, J., Robinson, D., & Robinson, D. (2017). Text mining with R: A tidy approach (p. 194). Boston (MA): O'reilly.
+
+2. Hu, M., & Liu, B. (2004). Mining and summarizing customer reviews. In Proceedings of the tenth ACM SIGKDD international conference on Knowledge discovery and data mining (pp. 168-177).
+
+3. Nielsen, F. Å. (2011). A new ANEW: Evaluation of a word list for sentiment analysis in microblogs. arXiv preprint arXiv:1103.2903.
+
+4. Mohammad, S. M., & Turney, P. D. (2013). Crowdsourcing a word–emotion association lexicon. Computational intelligence, 29(3), 436-465.
+
+5. Loughran, T., & McDonald, B. (2011). When is a liability not a liability? Textual analysis, dictionaries, and 10‐Ks. The Journal of finance, 66(1), 35-65.
+
+6. OpenAI. (2026, April 19). ChatGPT conversation with K. M. Qaiduzzaman on Sentiment Analysis Extension in R. Retrieved April 19, 2026, from <https://chat.openai.com/>
